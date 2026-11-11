@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import { config } from "./config.js";
 import { verifyToken, type TokenRole } from "./security.js";
 
+/** Erro com status HTTP. A mensagem vai para a tela do app, então é em português. */
 export class HttpError extends Error {
   constructor(
     public status: number,

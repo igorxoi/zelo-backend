@@ -1,27 +1,31 @@
+// Lê o arquivo .env quando ele existe (desenvolvimento local). Em hospedagem
+// (Render, Railway...) as variáveis já vêm do painel e o arquivo não existe.
+try {
+  process.loadEnvFile();
+} catch {
+  // sem .env: segue só com as variáveis do ambiente
+}
+
 /**
- * Configuração lida das variáveis de ambiente.
+ * Configuração lida das variáveis de ambiente (veja o .env.example).
  * Os segredos são obrigatórios: sem eles a API não sobe.
  */
 function required(name: string, minLength = 1): string {
   const value = process.env[name]?.trim();
-
   if (!value || value.length < minLength) {
     throw new Error(
       `Variável de ambiente ${name} ausente ou curta demais (mínimo ${minLength} caracteres).`,
     );
   }
-
   return value;
 }
 
 const number = (name: string, fallback: number) => {
   const raw = process.env[name];
   const value = raw === undefined || raw === "" ? fallback : Number(raw);
-
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`Variável de ambiente ${name} inválida.`);
   }
-
   return value;
 };
 
@@ -31,10 +35,7 @@ export const config = {
   jwtSecret: required("JWT_SECRET", 32),
   hashPepper: required("HASH_PEPPER", 32),
   timezone: process.env.APP_TIMEZONE ?? "America/Sao_Paulo",
-  inviteBaseUrl: (process.env.INVITE_BASE_URL ?? "zelo://invite").replace(
-    /\/$/,
-    "",
-  ),
+  inviteBaseUrl: (process.env.INVITE_BASE_URL ?? "zelo://invite").replace(/\/$/, ""),
   corsOrigin: process.env.CORS_ORIGIN ?? "*",
   /** Tempo de vida do token de login. */
   caregiverTokenDays: number("CAREGIVER_TOKEN_DAYS", 7),

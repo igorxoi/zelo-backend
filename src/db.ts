@@ -13,13 +13,16 @@ export interface Queryable {
 }
 
 export interface Db extends Queryable {
+  /** Executa `fn` numa transação: confirma se terminar bem, desfaz se lançar erro. */
   tx<T>(fn: (q: Queryable) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }
 
+/** Cria o Db em cima do driver `pg` (pool de conexões). */
 export async function createPgDb(connectionString: string): Promise<Db> {
   if (!connectionString) throw new Error("Defina DATABASE_URL.");
 
+  // Import dinâmico só para o tipo do módulo ficar isolado neste arquivo.
   const pg: any = await import("pg" as string);
   const Pool = pg.Pool ?? pg.default?.Pool;
   const pool = new Pool({ connectionString, max: 10 });
@@ -30,9 +33,7 @@ export async function createPgDb(connectionString: string): Promise<Db> {
       const client = await pool.connect();
       try {
         await client.query("begin");
-        const result = await fn({
-          query: (text, params) => client.query(text, params),
-        });
+        const result = await fn({ query: (text, params) => client.query(text, params) });
         await client.query("commit");
         return result;
       } catch (error) {
@@ -46,13 +47,11 @@ export async function createPgDb(connectionString: string): Promise<Db> {
   };
 }
 
-export function isUniqueViolation(
-  error: unknown,
-  constraint?: string,
-): boolean {
+/** Erro de violação de unique (23505). `constraint` filtra pelo nome do índice. */
+export function isUniqueViolation(error: unknown, constraint?: string): boolean {
   const e = error as { code?: string; constraint?: string };
   return e?.code === "23505" && (!constraint || e.constraint === constraint);
 }
 
-export const toIso = (value: unknown): string =>
-  new Date(value as string | number | Date).toISOString();
+/** Converte o timestamptz (Date ou string) do driver em ISO 8601. */
+export const toIso = (value: unknown): string => new Date(value as string | number | Date).toISOString();
