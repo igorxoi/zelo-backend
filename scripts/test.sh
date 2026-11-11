@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Recria o banco de teste (zelo_test), aplica o schema e roda os testes.
+# Precisa do `psql` e de um PostgreSQL acessível pelas variáveis padrão
+# (PGHOST, PGUSER, PGPORT, PGPASSWORD). O banco "zelo_test" é APAGADO a cada execução.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+DB="${PGTEST_DB:-zelo_test}"
+psql -d postgres -qX -c "drop database if exists ${DB}" -c "create database ${DB}"
+psql -d "${DB}" -qX -v ON_ERROR_STOP=1 -f database/schema.sql
+PGTEST_DB="${DB}" node --import tsx --test test/*.test.ts

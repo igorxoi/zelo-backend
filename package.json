@@ -1,0 +1,26 @@
+{
+  "name": "zelo-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API do Zelo (MVP): lembretes de medicamentos para idosos e seus cuidadores.",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "tsx watch --env-file=.env src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file=.env dist/src/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:migrate": "node --env-file=.env scripts/migrate.mjs",
+    "test": "bash scripts/test.sh"
+  },
+  "dependencies": {
+    "pg": "^8.13.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.10",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
