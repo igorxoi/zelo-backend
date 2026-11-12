@@ -61,7 +61,7 @@ export function doseRoutes(router: Router, db: Db) {
   // -------------------------------------------------------------------------
 
   /**
-   * Doses que pedem atenção do cuidador (getMissedDoses), das últimas 24 horas:
+   * Doses que pedem atenção do cuidador (getMissedDoses), só as de hoje:
    *   - "pending": chegou o horário e o paciente ainda não confirmou;
    *   - "missed": passou do prazo sem resposta;
    *   - "skipped": o paciente marcou "não tomei".
@@ -79,7 +79,7 @@ export function doseRoutes(router: Router, db: Db) {
        where d.patient_id = $1 and d.status in ('pending', 'missed', 'skipped')
          and d.confirmed_by_type is distinct from 'caregiver'
          and d.scheduled_at <= now()
-         and d.scheduled_at > now() - interval '24 hours'
+         and d.scheduled_at >= (((now() at time zone $2)::date)::timestamp at time zone $2) -- só de hoje
        order by d.scheduled_at desc`,
       [ctx.params.id, config.timezone],
     );
