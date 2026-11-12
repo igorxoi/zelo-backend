@@ -48,14 +48,22 @@ function assertOpen(dose: DoseRow) {
   }
 }
 
+/** O cuidador também pode corrigir uma dose que o paciente marcou como "não tomei". */
+function assertCaregiverCanEdit(dose: DoseRow) {
+  if (dose.status !== "pending" && dose.status !== "missed" && dose.status !== "skipped") {
+    throw new HttpError(409, "Esta dose já foi respondida.");
+  }
+}
+
 export function doseRoutes(router: Router, db: Db) {
   // -------------------------------------------------------------------------
   // Cuidador
   // -------------------------------------------------------------------------
 
   /**
-   * Doses das últimas 24 horas que não foram confirmadas (getMissedDoses).
-   * Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
+   * Doses das últimas 24 horas que não foram tomadas (getMissedDoses): as que
+   * passaram do prazo sem resposta ("missed") e as que o paciente marcou como
+   * "não tomei" ("skipped"). Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
    * que o app deve mandar em confirmDose (campo `medicationId` do payload).
    */
   router.get("/patients/:id/doses/missed", { role: "caregiver" }, async (ctx) => {
@@ -64,7 +72,7 @@ export function doseRoutes(router: Router, db: Db) {
     const { rows } = await db.query(
       `select d.id, m.name, m.dosage, to_char(d.scheduled_at at time zone $2, 'HH24:MI') as hhmm
        from doses d join medications m on m.id = d.medication_id
-       where d.patient_id = $1 and d.status = 'missed'
+       where d.patient_id = $1 and d.status in ('missed', 'skipped')
          and d.scheduled_at > now() - interval '24 hours'
        order by d.scheduled_at`,
       [ctx.params.id, config.timezone],
@@ -84,11 +92,11 @@ export function doseRoutes(router: Router, db: Db) {
     await db.tx(async (q) => {
       const dose = await lockDose(q, ctx.params.id, {});
       await requireLink(q, ctx.auth.id, dose.patient_id);
-      assertOpen(dose);
+      assertCaregiverCanEdit(dose);
 
       const next = data.status === "onTime" ? "taken" : data.status === "late" ? "taken_late" : "missed";
       if (next === "missed") {
-        if (dose.status === "missed") return; // já está assim
+        if (dose.status === "missed" || dose.status === "skipped") return; // já está como "não tomada"
         await q.query(
           `update doses set status = 'missed', note = nullif($2, ''),
                   confirmed_by_type = 'caregiver', confirmed_by_user_id = $3 where id = $1`,
@@ -100,7 +108,8 @@ export function doseRoutes(router: Router, db: Db) {
           `update doses set status = $2::dose_status,
                   taken_at = case when $3 = '' then now()
                                   else ((scheduled_at at time zone $4)::date + $3::time) at time zone $4 end,
-                  note = nullif($5, ''), confirmed_by_type = 'caregiver', confirmed_by_user_id = $6
+                  note = nullif($5, ''), confirmed_by_type = 'caregiver', confirmed_by_user_id = $6,
+                  skip_reason = null
            where id = $1
            returning (taken_at <= now() + interval '5 minutes') as ok`,
           [dose.id, next, data.time, config.timezone, data.notes, ctx.auth.id],
@@ -125,7 +134,7 @@ export function doseRoutes(router: Router, db: Db) {
 
   /**
    * Doses de hoje que o paciente ainda precisa confirmar (getPendingDoses):
-   * as pendentes que já estão na janela (1h antes do horário) e as que
+   * as pendentes que já chegaram no horário (mais a janela PATIENT_DOSE_WINDOW_MINUTES, 0 por padrão) e as que
    * passaram do prazo, para ele ainda poder avisar que tomou.
    */
   router.get("/patient/doses/pending", { role: "patient" }, async (ctx) => {
@@ -171,8 +180,8 @@ export function doseRoutes(router: Router, db: Db) {
   });
 
   /**
-   * "Não tomei" (skipDose), com o motivo. "Estou passando mal" e "O remédio
-   * acabou" também avisam os cuidadores.
+   * "Não tomei" (skipDose), com o motivo. Todo "não tomei" avisa os cuidadores
+   * (notificação) e entra no alerta da home.
    */
   router.post("/patient/doses/:id/skip", { role: "patient" }, async (ctx) => {
     assertUuid(ctx.params.id, "Dose não encontrada.");
@@ -201,12 +210,20 @@ export function doseRoutes(router: Router, db: Db) {
           message: `Não tomou ${what}: está passando mal`,
           doseId: dose.id,
         });
-      } else if (reason === "ranOut") {
+      } else {
+        const why =
+          reason === "ranOut"
+            ? "o remédio acabou"
+            : reason === "notNow"
+              ? "preferiu não tomar agora"
+              : reason === "noAnswer"
+                ? "sem resposta"
+                : "outro motivo";
         await notify(q, {
           patientId: dose.patient_id,
           type: "missed_dose",
           title: "Dose não tomada",
-          message: `Não tomou ${what}: o remédio acabou`,
+          message: `Não tomou ${what}: ${why}`,
           doseId: dose.id,
         });
       }

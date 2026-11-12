@@ -18,7 +18,7 @@ export function createApp(db: Db) {
     return { status: "ok" };
   });
 
-  // Página aberta pelo link do convite.
+  // Página aberta pelo link do convite: tenta abrir o app e mostra o código para colar.
   router.get("/convite/:token", {}, async ({ params }) => new HtmlReply(invitePage(params.token)));
 
   authRoutes(router, db);
@@ -29,6 +29,7 @@ export function createApp(db: Db) {
   patientAppRoutes(router, db);
   caregiverAppRoutes(router, db);
 
+  // Token válido não basta: a pessoa precisa ainda existir (paciente excluído perde o acesso na hora).
   const authorize = async (auth: Auth) => {
     const table = auth.role === "caregiver" ? "users" : "patients";
     const { rows } = await db.query(`select 1 from ${table} where id = $1`, [auth.id]);

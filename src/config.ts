@@ -49,7 +49,7 @@ export const config = {
   /** Depois de quantos minutos sem confirmação a dose vira "missed". */
   doseMissedAfterMinutes: number("DOSE_MISSED_AFTER_MINUTES", 30),
   /** O paciente vê a dose a partir de quantos minutos antes do horário. */
-  patientDoseWindowMinutes: number("PATIENT_DOSE_WINDOW_MINUTES", 60),
+  patientDoseWindowMinutes: number("PATIENT_DOSE_WINDOW_MINUTES", 0),
   inviteValidDays: 7,
   pairingCodeValidHours: 24,
 } as const;

@@ -25,7 +25,6 @@ export class Reply {
 export class HtmlReply {
   constructor(public html: string) {}
 }
-
 export const created = (body: unknown) => new Reply(201, body);
 export const noContent = () => new Reply(204);
 

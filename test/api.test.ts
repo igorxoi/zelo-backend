@@ -357,10 +357,10 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal((await api("GET", "/notifications", { token: s.A.token })).body.length, 1);
   });
 
-  it("o paciente vê as doses abertas (pendentes na janela + atrasadas)", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
+  it("o paciente vê as doses abertas (já no horário + atrasadas), não as de daqui a pouco", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
     const res = await api("GET", "/patient/doses/pending", { token: s.P.token });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.map((d: any) => d.scheduledTime), [s.t.missed, s.t.skipped, s.t.taken, s.t.soon]);
+    assert.deepEqual(res.body.map((d: any) => d.scheduledTime), [s.t.missed, s.t.skipped, s.t.taken]);
     assert.deepEqual(Object.keys(res.body[0]).sort(), ["dosage", "id", "name", "scheduledTime"]);
     s.pending = res.body;
   });
@@ -387,11 +387,37 @@ describe("doses, alertas, notificações e histórico", () => {
     const notifs = await api("GET", "/notifications", { token: s.A.token });
     const sym = notifs.body.find((n: any) => n.type === "symptom");
     assert.match(sym.message, /passando mal/);
-    // Dose futura pode ser pulada e some da lista; as respondidas também.
-    await api("POST", `/patient/doses/${s.pending[3].id}/skip`, { token: s.P.token, body: { reason: "notNow" } });
+    // "Não tomei" entra no alerta da home do cuidador (junto das atrasadas).
+    const alert = await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token });
+    assert.deepEqual(alert.body.map((d: any) => d.scheduledTime), [s.t.skipped]);
+    // Dose respondida some da lista do paciente; a de daqui a 30 min ainda nem apareceu.
     assert.equal((await api("GET", "/patient/doses/pending", { token: s.P.token })).body.length, 0);
-    // Outro paciente/perfil não responde dose alheia.
-    assert.equal((await api("POST", `/patient/doses/${s.pending[3].id}/take`, { token: s.P.token })).status, 409);
+    // Responder de novo não vale.
+    assert.equal((await api("POST", `/patient/doses/${s.pending[1].id}/take`, { token: s.P.token })).status, 409);
+  });
+
+  it("todo motivo de 'Não tomei' avisa os cuidadores", async () => {
+    for (const reason of ["notNow", "ranOut", "other"]) {
+      const med = await api("POST", `/patients/${s.patientId}/medications`, {
+        token: s.A.token,
+        body: { name: `Motivo ${reason}`, dosage: "1mg", startDate: todayLocal(), endDate: null, notes: "", schedule: { type: "daily", time: localTime(0).text } },
+      });
+      const dose = await db.query(
+        `insert into doses (patient_id, medication_id, scheduled_at)
+         values ($1, $2, now() - interval '1 minute') returning id`,
+        [s.patientId, med.body.id],
+      );
+      const id = dose.rows[0].id;
+      assert.equal((await api("POST", `/patient/doses/${id}/skip`, { token: s.P.token, body: { reason } })).status, 204);
+      const notif = await db.query("select type::text as type from notifications where dose_id = $1", [id]);
+      assert.equal(notif.rows.length, 1);
+      assert.equal(notif.rows[0].type, "missed_dose");
+      // Limpa para não interferir nos testes de histórico.
+      await db.query("delete from notifications where dose_id = $1", [id]);
+      await db.query("delete from dose_events where dose_id = $1", [id]);
+      await db.query("delete from doses where id = $1", [id]);
+      await db.query("delete from medications where id = $1", [med.body.id]);
+    }
   });
 
   it("o cuidador confirma uma dose pelo paciente e fica registrado no histórico", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
@@ -403,8 +429,10 @@ describe("doses, alertas, notificações e histórico", () => {
     });
     await db.query("update medications set created_at = now() - interval '2 days' where id = $1", [med.body.id]);
     const missed = await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token });
-    assert.equal(missed.body.length, 1);
-    const doseId = missed.body[0].id;
+    // Além da recém-criada, a dose que o paciente marcou "não tomei" também aparece.
+    assert.equal(missed.body.length, 2);
+    const doseId = missed.body.find((d: any) => d.name.startsWith("Atrasado")).id;
+    const skippedId = missed.body.find((d: any) => !d.name.startsWith("Atrasado")).id;
 
     // Horário no futuro só dá para testar se "daqui a 3h" ainda cai hoje (depois das 21h passa da meia-noite).
     if (localTime(180).minuteOfDay > minute) {
@@ -414,6 +442,9 @@ describe("doses, alertas, notificações e histórico", () => {
 
     const ok = await api("POST", `/doses/${doseId}/confirm`, { token: s.B.token, body: { status: "late", time: localTime(-10).text, notes: "Administrado após o café" } });
     assert.equal(ok.status, 204);
+    assert.equal((await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token })).body.length, 1);
+    // O cuidador também resolve a dose que o paciente marcou "não tomei".
+    assert.equal((await api("POST", `/doses/${skippedId}/confirm`, { token: s.A.token, body: { status: "late", time: localTime(-10).text, notes: "" } })).status, 204);
     assert.equal((await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token })).body.length, 0);
     assert.equal((await api("POST", `/doses/${doseId}/confirm`, { token: s.A.token, body: { status: "onTime", time: "", notes: "" } })).status, 409);
     assert.equal((await api("POST", `/doses/${doseId}/confirm`, { token: s.intruder.token, body: { status: "onTime", time: "", notes: "" } })).status, 404);
@@ -454,9 +485,10 @@ describe("doses, alertas, notificações e histórico", () => {
     const filtered = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}&medicationId=${s.doseMed.id}`, { token: s.A.token });
     assert.ok(filtered.body.length >= 3);
     assert.ok(filtered.body.every((e: any) => e.variant === "medication" && e.title.startsWith("Dose Teste 10mg")));
-    const skipped = filtered.body.find((e: any) => e.skipReason === "Estou passando mal");
-    assert.ok(skipped, "dose pulada mostra o motivo");
-    assert.equal(skipped.title, "Dose Teste 10mg não tomada");
+    // A dose que o paciente marcou "não tomei" e o cuidador corrigiu mostra a alteração.
+    const fixed = filtered.body.find((e: any) => e.title === "Dose Teste 10mg tomada com atraso" && e.changes);
+    assert.ok(fixed, "dose corrigida pelo cuidador mostra a alteração");
+    assert.match(fixed.changes[0].text, /mudou de Não tomou para Tomou com atraso/);
 
     assert.deepEqual((await api("GET", `/patients/${s.patientId}/history?date=2020-01-01`, { token: s.A.token })).body, []);
     assert.equal((await api("GET", `/patients/${s.patientId}/history?date=ontem`, { token: s.A.token })).status, 422);
