@@ -158,7 +158,7 @@ export function historyRoutes(router: Router, db: Db) {
       });
     }
 
-    return items.sort((a, b) => a.at - b.at).map((i) => i.event);
+    return items.sort((a, b) => b.at - a.at).map((i) => i.event);
   });
 
   /**

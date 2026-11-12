@@ -331,7 +331,7 @@ async function getPatientDetails(q: Queryable, patientId: string, userId: string
   if (patient.rows.length === 0) throw new HttpError(404, "Paciente não encontrado.");
 
   const active = await q.query(
-    `select u.id, u.name, u.email, u.phone
+    `select u.id, u.name, u.email, u.phone, pc.is_master
      from patient_caregivers pc join users u on u.id = pc.user_id
      where pc.patient_id = $1 order by pc.is_master desc, pc.created_at`,
     [patientId],
@@ -356,6 +356,7 @@ async function getPatientDetails(q: Queryable, patientId: string, userId: string
         email: c.email,
         ...(c.phone ? { phone: c.phone } : {}),
         status: "active" as const,
+        isMaster: c.is_master,
       })),
       // Convite vencido continua na lista com 0 dia, para o master reenviar.
       ...pending.rows.map((c) => ({

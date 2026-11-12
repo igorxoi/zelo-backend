@@ -133,7 +133,7 @@ export function medicationRoutes(router: Router, db: Db) {
   router.get("/patients/:id/medications", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     const { rows } = await db.query<Row>(
-      `${SELECT} where m.patient_id = $1 and m.ended_at is null order by m.created_at`,
+      `${SELECT} where m.patient_id = $1 and m.ended_at is null order by m.created_at desc`,
       [ctx.params.id],
     );
     return rows.map(toMedication);
