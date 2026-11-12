@@ -477,6 +477,36 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal(relatos[0].tag, "Anormalidade");
   });
 
+  it("alerta da home: hora inválida é recusada com mensagem; 'Não tomou' resolve o alerta", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
+    const t = localTime(-50).text;
+    const med = await api("POST", `/patients/${s.patientId}/medications`, {
+      token: s.A.token,
+      body: { name: "Alerta", dosage: "1mg", startDate: todayLocal(), endDate: null, notes: "", schedule: { type: "daily", time: t } },
+    });
+    await db.query("update medications set created_at = now() - interval '2 days' where id = $1", [med.body.id]);
+    const find = async () =>
+      (await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token })).body.find((d: any) => d.name.startsWith("Alerta"));
+    const dose = await find();
+    assert.ok(dose, "a dose atrasada aparece no alerta");
+
+    const bad = await api("POST", `/doses/${dose.id}/confirm`, { token: s.A.token, body: { status: "late", time: "2130", notes: "" } });
+    assert.equal(bad.status, 422);
+    assert.ok(bad.body.message);
+
+    const no = await api("POST", `/doses/${dose.id}/confirm`, { token: s.A.token, body: { status: "missed", time: "", notes: "Liguei e não tomou" } });
+    assert.equal(no.status, 204);
+    assert.equal(await find(), undefined, "depois de 'Não tomou' o alerta some");
+
+    // Continua como "não tomada" no histórico.
+    const hist = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}&medicationId=${med.body.id}`, { token: s.A.token });
+    assert.equal(hist.body[0].title, "Alerta 1mg não tomada");
+
+    await db.query("delete from notifications where dose_id = $1", [dose.id]);
+    await db.query("delete from dose_events where dose_id = $1", [dose.id]);
+    await db.query("delete from doses where id = $1", [dose.id]);
+    await db.query("delete from medications where id = $1", [med.body.id]);
+  });
+
   it("histórico: filtro por medicamento, dia vazio e medicamentos do mês", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
     const all = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}`, { token: s.A.token });
     const times = all.body.map((e: any) => e.time);

@@ -63,7 +63,7 @@ export function doseRoutes(router: Router, db: Db) {
   /**
    * Doses das últimas 24 horas que não foram tomadas (getMissedDoses): as que
    * passaram do prazo sem resposta ("missed") e as que o paciente marcou como
-   * "não tomei" ("skipped"). Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
+   * "não tomei" ("skipped"), até um cuidador confirmar ou dar como "não tomou". Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
    * que o app deve mandar em confirmDose (campo `medicationId` do payload).
    */
   router.get("/patients/:id/doses/missed", { role: "caregiver" }, async (ctx) => {
@@ -73,6 +73,7 @@ export function doseRoutes(router: Router, db: Db) {
       `select d.id, m.name, m.dosage, to_char(d.scheduled_at at time zone $2, 'HH24:MI') as hhmm
        from doses d join medications m on m.id = d.medication_id
        where d.patient_id = $1 and d.status in ('missed', 'skipped')
+         and d.confirmed_by_type is distinct from 'caregiver'
          and d.scheduled_at > now() - interval '24 hours'
        order by d.scheduled_at`,
       [ctx.params.id, config.timezone],
@@ -96,7 +97,14 @@ export function doseRoutes(router: Router, db: Db) {
 
       const next = data.status === "onTime" ? "taken" : data.status === "late" ? "taken_late" : "missed";
       if (next === "missed") {
-        if (dose.status === "missed" || dose.status === "skipped") return; // já está como "não tomada"
+        if (dose.status === "missed" || dose.status === "skipped") {
+          await q.query(
+            `update doses set note = coalesce(nullif($2, ''), note),
+                    confirmed_by_type = 'caregiver', confirmed_by_user_id = $3 where id = $1`,
+            [dose.id, data.notes, ctx.auth.id],
+          );
+          return;
+        }
         await q.query(
           `update doses set status = 'missed', note = nullif($2, ''),
                   confirmed_by_type = 'caregiver', confirmed_by_user_id = $3 where id = $1`,
