@@ -251,6 +251,7 @@ describe("convites e regra do master", () => {
     const detail = await api("GET", `/patients/${s.patientId}`, { token: s.B.token });
     assert.equal(detail.body.caregivers.length, 2);
     assert.ok(detail.body.caregivers.every((c: any) => c.status === "active"));
+    assert.deepEqual(detail.body.caregivers.map((c: any) => c.isMaster), [true, false]);
     s.intruder = other.body;
   });
 
@@ -344,10 +345,10 @@ describe("doses, alertas, notificações e histórico", () => {
     // Alerta do cuidador: a atrasada (missed) e as que já chegaram no horário e o paciente não confirmou (pending).
     assert.deepEqual(
       missed.body.map((d: any) => [d.scheduledTime, d.status]),
-      [[t.missed, "missed"], [t.skipped, "pending"], [t.taken, "pending"]],
+      [[t.taken, "pending"], [t.skipped, "pending"], [t.missed, "missed"]], // mais recente primeiro
     );
-    assert.equal(missed.body[0].name, "Dose Teste 10mg");
-    s.missedDoseId = missed.body[0].id;
+    assert.equal(missed.body[2].name, "Dose Teste 10mg");
+    s.missedDoseId = missed.body[2].id;
 
     const notifs = await api("GET", "/notifications", { token: s.A.token });
     assert.equal(notifs.body[0].type, "missedDose");
@@ -543,7 +544,7 @@ describe("doses, alertas, notificações e histórico", () => {
   it("histórico: filtro por medicamento, dia vazio e medicamentos do mês", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
     const all = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}`, { token: s.A.token });
     const times = all.body.map((e: any) => e.time);
-    assert.deepEqual(times, [...times].sort());
+    assert.deepEqual(times, [...times].sort().reverse()); // mais recente primeiro
 
     const filtered = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}&medicationId=${s.doseMed.id}`, { token: s.A.token });
     assert.ok(filtered.body.length >= 3);

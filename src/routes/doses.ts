@@ -80,7 +80,7 @@ export function doseRoutes(router: Router, db: Db) {
          and d.confirmed_by_type is distinct from 'caregiver'
          and d.scheduled_at <= now()
          and d.scheduled_at > now() - interval '24 hours'
-       order by d.scheduled_at`,
+       order by d.scheduled_at desc`,
       [ctx.params.id, config.timezone],
     );
     return rows.map((r) => ({
