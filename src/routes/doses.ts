@@ -127,7 +127,7 @@ export function doseRoutes(router: Router, db: Db) {
         const taken = await q.query<{ ok: boolean }>(
           `update doses set status = $2::dose_status,
                   taken_at = case when $3 = '' then now()
-                                  else ((scheduled_at at time zone $4)::date + $3::time) at time zone $4 end,
+                                  else ((scheduled_at at time zone $4)::date + nullif($3, '')::time) at time zone $4 end,
                   note = nullif($5, ''), confirmed_by_type = 'caregiver', confirmed_by_user_id = $6,
                   skip_reason = null
            where id = $1
@@ -154,15 +154,16 @@ export function doseRoutes(router: Router, db: Db) {
 
   /**
    * Doses de hoje que o paciente ainda precisa confirmar (getPendingDoses):
-   * as pendentes que já chegaram no horário (mais a janela PATIENT_DOSE_WINDOW_MINUTES, 0 por padrão) e as que
-   * passaram do prazo, para ele ainda poder avisar que tomou.
+   * só as pendentes que já chegaram no horário (mais a janela
+   * PATIENT_DOSE_WINDOW_MINUTES, 0 por padrão). Dose que virou "não tomada",
+   * ou que o cuidador já confirmou, não volta para o paciente.
    */
   router.get("/patient/doses/pending", { role: "patient" }, async (ctx) => {
     await refreshDoses(db, [ctx.auth.id]);
     const { rows } = await db.query(
       `select d.id, m.name, m.dosage, to_char(d.scheduled_at at time zone $2, 'HH24:MI') as hhmm
        from doses d join medications m on m.id = d.medication_id
-       where d.patient_id = $1 and d.status in ('pending', 'missed')
+       where d.patient_id = $1 and d.status = 'pending'
          and d.scheduled_at >= (((now() at time zone $2)::date)::timestamp at time zone $2)
          and d.scheduled_at <= now() + make_interval(mins => $3::int)
        order by d.scheduled_at, m.name`,

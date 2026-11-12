@@ -362,33 +362,37 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal((await api("GET", "/notifications", { token: s.A.token })).body.length, 1);
   });
 
-  it("o paciente vê as doses abertas (já no horário + atrasadas), não as de daqui a pouco", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
+  it("o paciente vê só as doses pendentes já no horário (não as atrasadas nem as de daqui a pouco)", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
     const res = await api("GET", "/patient/doses/pending", { token: s.P.token });
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.map((d: any) => d.scheduledTime), [s.t.missed, s.t.skipped, s.t.taken]);
+    assert.deepEqual(res.body.map((d: any) => d.scheduledTime), [s.t.skipped, s.t.taken]);
     assert.deepEqual(Object.keys(res.body[0]).sort(), ["dosage", "id", "name", "scheduledTime"]);
     s.pending = res.body;
   });
 
-  it("'Tomei' no prazo = taken; depois do prazo = taken_late", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
-    const onTime = await api("POST", `/patient/doses/${s.pending[2].id}/take`, { token: s.P.token });
+  it("'Tomei' no prazo = taken; dose atrasada não volta para o paciente e o cuidador resolve", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
+    // pending[0] = "skipped" (-10 min), pending[1] = "taken" (-5 min)
+    const onTime = await api("POST", `/patient/doses/${s.pending[1].id}/take`, { token: s.P.token });
     assert.equal(onTime.status, 200);
     assert.match(onTime.body.time, /^\d\d:\d\d$/);
-    const late = await api("POST", `/patient/doses/${s.pending[0].id}/take`, { token: s.P.token });
-    assert.equal(late.status, 200);
-    const rows = await db.query("select id, status::text as status from doses where id = any($1::uuid[])", [[s.pending[2].id, s.pending[0].id]]);
-    const byId = Object.fromEntries(rows.rows.map((r: any) => [r.id, r.status]));
-    assert.equal(byId[s.pending[2].id], "taken");
-    assert.equal(byId[s.pending[0].id], "taken_late");
-    assert.equal((await api("POST", `/patient/doses/${s.pending[2].id}/take`, { token: s.P.token })).status, 409);
-    // Dose já tomada some do alerta; sobra só a que ainda está sem resposta.
+    const row = await db.query("select status::text as status from doses where id = $1", [s.pending[1].id]);
+    assert.equal(row.rows[0].status, "taken");
+    assert.equal((await api("POST", `/patient/doses/${s.pending[1].id}/take`, { token: s.P.token })).status, 409);
+
+    // A atrasada (-40 min, já "não tomada") não aparece mais para o paciente...
+    assert.ok(!(await api("GET", "/patient/doses/pending", { token: s.P.token })).body.some((d: any) => d.scheduledTime === s.t.missed));
+    // ...mas continua no alerta do cuidador, que pode confirmar que foi tomada com atraso.
+    assert.equal((await api("POST", `/doses/${s.missedDoseId}/confirm`, { token: s.A.token, body: { status: "late", time: "", notes: "" } })).status, 204);
+    const late = await db.query("select status::text as status from doses where id = $1", [s.missedDoseId]);
+    assert.equal(late.rows[0].status, "taken_late");
+    // Dose tomada some do alerta; sobra só a que ainda está sem resposta.
     const left = await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token });
     assert.deepEqual(left.body.map((d: any) => d.scheduledTime), [s.t.skipped]);
   });
 
   it("'Não tomei' guarda o motivo; 'passando mal' avisa os cuidadores", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
-    assert.equal((await api("POST", `/patient/doses/${s.pending[1].id}/skip`, { token: s.P.token, body: { reason: "inventado" } })).status, 422);
-    const res = await api("POST", `/patient/doses/${s.pending[1].id}/skip`, { token: s.P.token, body: { reason: "feelingUnwell" } });
+    assert.equal((await api("POST", `/patient/doses/${s.pending[0].id}/skip`, { token: s.P.token, body: { reason: "inventado" } })).status, 422);
+    const res = await api("POST", `/patient/doses/${s.pending[0].id}/skip`, { token: s.P.token, body: { reason: "feelingUnwell" } });
     assert.equal(res.status, 204);
     const notifs = await api("GET", "/notifications", { token: s.A.token });
     const sym = notifs.body.find((n: any) => n.type === "symptom");
@@ -399,7 +403,7 @@ describe("doses, alertas, notificações e histórico", () => {
     // Dose respondida some da lista do paciente; a de daqui a 30 min ainda nem apareceu.
     assert.equal((await api("GET", "/patient/doses/pending", { token: s.P.token })).body.length, 0);
     // Responder de novo não vale.
-    assert.equal((await api("POST", `/patient/doses/${s.pending[1].id}/take`, { token: s.P.token })).status, 409);
+    assert.equal((await api("POST", `/patient/doses/${s.pending[0].id}/take`, { token: s.P.token })).status, 409);
   });
 
   it("todo motivo de 'Não tomei' avisa os cuidadores", async () => {
