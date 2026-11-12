@@ -35,6 +35,10 @@ export const config = {
   jwtSecret: required("JWT_SECRET", 32),
   hashPepper: required("HASH_PEPPER", 32),
   timezone: process.env.APP_TIMEZONE ?? "America/Sao_Paulo",
+  /**
+   * Endereço público da API, usado no link de convite (https, clicável no WhatsApp).
+   * No Render, RENDER_EXTERNAL_URL já vem preenchida; localmente cai em localhost.
+   */
   publicUrl: (
     process.env.PUBLIC_URL ??
     process.env.RENDER_EXTERNAL_URL ??
@@ -46,9 +50,9 @@ export const config = {
   patientTokenDays: number("PATIENT_TOKEN_DAYS", 90),
   /** Até quantos minutos depois do horário a dose ainda conta como "no horário". */
   doseOnTimeMinutes: number("DOSE_ON_TIME_MINUTES", 15),
-  /** Depois de quantos minutos sem confirmação a dose vira "missed". */
-  doseMissedAfterMinutes: number("DOSE_MISSED_AFTER_MINUTES", 30),
-  /** O paciente vê a dose a partir de quantos minutos antes do horário. */
+  /** Depois de quantos minutos sem confirmação a dose vira "missed" (não tomada). */
+  doseMissedAfterMinutes: number("DOSE_MISSED_AFTER_MINUTES", 15),
+  /** O paciente vê a dose a partir de quantos minutos antes do horário (0 = só na hora). */
   patientDoseWindowMinutes: number("PATIENT_DOSE_WINDOW_MINUTES", 0),
   inviteValidDays: 7,
   pairingCodeValidHours: 24,

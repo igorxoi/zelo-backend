@@ -483,6 +483,27 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal(relatos[0].tag, "Anormalidade");
   });
 
+  it("passou de 15 min sem resposta = não tomada; com 14 min ainda é pendente", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
+    const mk = async (name: string, offset: number) => {
+      const med = await api("POST", `/patients/${s.patientId}/medications`, {
+        token: s.A.token,
+        body: { name, dosage: "1mg", startDate: todayLocal(), endDate: null, notes: "", schedule: { type: "daily", time: localTime(offset).text } },
+      });
+      await db.query("update medications set created_at = now() - interval '2 days' where id = $1", [med.body.id]);
+      return med.body.id as string;
+    };
+    const lateId = await mk("Limite16", -16);
+    const okId = await mk("Limite14", -14);
+    const list = (await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token })).body;
+    assert.equal(list.find((d: any) => d.name.startsWith("Limite16")).status, "missed");
+    assert.equal(list.find((d: any) => d.name.startsWith("Limite14")).status, "pending");
+    for (const id of [lateId, okId]) {
+      await db.query("delete from notifications where dose_id in (select id from doses where medication_id = $1)", [id]);
+      await db.query("delete from dose_events where dose_id in (select id from doses where medication_id = $1)", [id]);
+      await db.query("delete from medications where id = $1", [id]);
+    }
+  });
+
   it("alerta da home: hora inválida é recusada com mensagem; 'Não tomou' resolve o alerta", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
     const t = localTime(-50).text;
     const med = await api("POST", `/patients/${s.patientId}/medications`, {
