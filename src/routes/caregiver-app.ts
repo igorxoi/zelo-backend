@@ -6,12 +6,7 @@ import { HttpError, noContent, type Router } from "../http.js";
 
 const TYPE_TO_APP = { missed_dose: "missedDose", symptom: "symptom" } as const;
 
-/** Notificações e perfil do cuidador. */
 export function caregiverAppRoutes(router: Router, db: Db) {
-  /**
-   * Notificações do cuidador, da mais recente para a mais antiga (getNotifications).
-   * Antes de listar, marca as doses vencidas, para a lista nunca ficar atrasada.
-   */
   router.get("/notifications", { role: "caregiver" }, async (ctx) => {
     const mine = await db.query<{ patient_id: string }>(
       "select patient_id from patient_caregivers where user_id = $1",
@@ -40,7 +35,6 @@ export function caregiverAppRoutes(router: Router, db: Db) {
     }));
   });
 
-  /** Marca uma notificação como lida (extra: o app ainda não usa). */
   router.post("/notifications/:id/read", { role: "caregiver" }, async (ctx) => {
     assertUuid(ctx.params.id, "Notificação não encontrada.");
     const { rows } = await db.query(
@@ -52,7 +46,6 @@ export function caregiverAppRoutes(router: Router, db: Db) {
     return noContent();
   });
 
-  /** Marca todas como lidas (extra). */
   router.post("/notifications/read-all", { role: "caregiver" }, async (ctx) => {
     await db.query(
       "update notification_recipients set read_at = now() where user_id = $1 and read_at is null",
@@ -61,10 +54,6 @@ export function caregiverAppRoutes(router: Router, db: Db) {
     return noContent();
   });
 
-  /**
-   * Perfil do cuidador logado (getUserProfile). "Master" = quem cadastrou ao
-   * menos um paciente; a regra por paciente vem em `isMaster` de GET /patients.
-   */
   router.get("/profile", { role: "caregiver" }, async (ctx) => {
     const { rows } = await db.query(
       `select u.id, u.name, u.email, u.phone,

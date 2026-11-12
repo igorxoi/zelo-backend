@@ -16,9 +16,6 @@ const scrypt = promisify(scryptCallback) as (
   keylen: number,
 ) => Promise<Buffer>;
 
-// ---------------------------------------------------------------------------
-// Senha (scrypt). Formato guardado: "scrypt$<salt>$<hash>" em base64.
-// ---------------------------------------------------------------------------
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const hash = await scrypt(password, salt, 64);
@@ -33,26 +30,17 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return timingSafeEqual(actual, expected);
 }
 
-// ---------------------------------------------------------------------------
-// Hash de dados sensíveis (LGPD). HMAC com segredo do servidor: quem vazar o
-// banco não consegue testar CPFs ou códigos sem o segredo.
-// ---------------------------------------------------------------------------
 export const hmac = (scope: string, value: string) =>
   createHmac("sha256", config.hashPepper).update(`${scope}:${value}`).digest("hex");
 
 export const hashCpf = (cpfDigits: string) => hmac("cpf", cpfDigits);
 export const hashPairingCode = (code: string) => hmac("pairing", code);
 
-/** Código de pareamento: 6 números. */
 export const generatePairingCode = () => String(randomInt(100000, 1000000));
 
-/** Token do link de convite: aleatório (256 bits). No banco vai só o hash. */
 export const generateInviteToken = () => randomBytes(32).toString("base64url");
 export const hashInviteToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
-// ---------------------------------------------------------------------------
-// JWT HS256 mínimo (sem dependências).
-// ---------------------------------------------------------------------------
 export type TokenRole = "caregiver" | "patient";
 export type TokenPayload = { sub: string; role: TokenRole; exp: number };
 

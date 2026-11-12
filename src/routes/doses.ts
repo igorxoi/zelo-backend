@@ -11,7 +11,6 @@ const SKIP_REASONS = ["feelingUnwell", "ranOut", "notNow", "other", "noAnswer"] 
 
 const confirmSchema = z.object({
   status: z.enum(["onTime", "late", "missed"]),
-  // "HH:mm" do horário em que tomou; vazio quando o status é "missed".
   time: z.union([z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), z.literal("")]).default(""),
   notes: z.string().trim().max(500).default(""),
 });
@@ -27,7 +26,6 @@ type DoseRow = {
   hhmm: string;
 };
 
-/** Dose + medicamento, travando a linha para duas respostas não se atropelarem. */
 async function lockDose(q: Queryable, doseId: string, where: { patientId?: string }) {
   const { rows } = await q.query<DoseRow>(
     `select d.id, d.patient_id, d.status, m.name, m.dosage,
@@ -41,14 +39,12 @@ async function lockDose(q: Queryable, doseId: string, where: { patientId?: strin
   return rows[0];
 }
 
-/** Só doses sem resposta (pendentes ou já marcadas como não tomadas) aceitam resposta. */
 function assertOpen(dose: DoseRow) {
   if (dose.status !== "pending" && dose.status !== "missed") {
     throw new HttpError(409, "Esta dose já foi respondida.");
   }
 }
 
-/** O cuidador também pode corrigir uma dose que o paciente marcou como "não tomei". */
 function assertCaregiverCanEdit(dose: DoseRow) {
   if (dose.status !== "pending" && dose.status !== "missed" && dose.status !== "skipped") {
     throw new HttpError(409, "Esta dose já foi respondida.");
@@ -56,19 +52,7 @@ function assertCaregiverCanEdit(dose: DoseRow) {
 }
 
 export function doseRoutes(router: Router, db: Db) {
-  // -------------------------------------------------------------------------
-  // Cuidador
-  // -------------------------------------------------------------------------
 
-  /**
-   * Doses que pedem atenção do cuidador (getMissedDoses), só as de hoje:
-   *   - "pending": chegou o horário e o paciente ainda não confirmou;
-   *   - "missed": passou do prazo sem resposta;
-   *   - "skipped": o paciente marcou "não tomei".
-   * Cada uma sai da lista quando um cuidador confirma ou dá como "não tomou".
-   * Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
-   * que o app deve mandar em confirmDose (campo `medicationId` do payload).
-   */
   router.get("/patients/:id/doses/missed", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     await refreshDoses(db, [ctx.params.id]);
@@ -79,7 +63,7 @@ export function doseRoutes(router: Router, db: Db) {
        where d.patient_id = $1 and d.status in ('pending', 'missed', 'skipped')
          and d.confirmed_by_type is distinct from 'caregiver'
          and d.scheduled_at <= now()
-         and d.scheduled_at >= (((now() at time zone $2)::date)::timestamp at time zone $2) -- só de hoje
+         and d.scheduled_at >= (((now() at time zone $2)::date)::timestamp at time zone $2)
        order by d.scheduled_at desc`,
       [ctx.params.id, config.timezone],
     );
@@ -91,11 +75,6 @@ export function doseRoutes(router: Router, db: Db) {
     }));
   });
 
-  /**
-   * O cuidador confirma uma dose pelo paciente (confirmDose): "tomou no
-   * horário", "tomou com atraso" ou "não tomou". Fica registrado no histórico
-   * com o nome de quem alterou.
-   */
   router.post("/doses/:id/confirm", { role: "caregiver" }, async (ctx) => {
     assertUuid(ctx.params.id, "Dose não encontrada.");
     const data = confirmSchema.parse(ctx.body);
@@ -108,8 +87,6 @@ export function doseRoutes(router: Router, db: Db) {
       const next = data.status === "onTime" ? "taken" : data.status === "late" ? "taken_late" : "missed";
       if (next === "missed") {
         if (dose.status === "missed" || dose.status === "skipped") {
-          // Já está como "não tomada": o cuidador só está dando o alerta como visto.
-          // Fica registrado quem viu (confirmed_by_type) e o alerta da home some.
           await q.query(
             `update doses set note = coalesce(nullif($2, ''), note),
                     confirmed_by_type = 'caregiver', confirmed_by_user_id = $3 where id = $1`,
@@ -123,7 +100,6 @@ export function doseRoutes(router: Router, db: Db) {
           [dose.id, data.notes, ctx.auth.id],
         );
       } else {
-        // Horário informado vale para o dia da dose; sem horário, vale agora.
         const taken = await q.query<{ ok: boolean }>(
           `update doses set status = $2::dose_status,
                   taken_at = case when $3 = '' then now()
@@ -148,16 +124,6 @@ export function doseRoutes(router: Router, db: Db) {
     return noContent();
   });
 
-  // -------------------------------------------------------------------------
-  // Paciente
-  // -------------------------------------------------------------------------
-
-  /**
-   * Doses de hoje que o paciente ainda precisa confirmar (getPendingDoses):
-   * só as pendentes que já chegaram no horário (mais a janela
-   * PATIENT_DOSE_WINDOW_MINUTES, 0 por padrão). Dose que virou "não tomada",
-   * ou que o cuidador já confirmou, não volta para o paciente.
-   */
   router.get("/patient/doses/pending", { role: "patient" }, async (ctx) => {
     await refreshDoses(db, [ctx.auth.id]);
     const { rows } = await db.query(
@@ -172,10 +138,6 @@ export function doseRoutes(router: Router, db: Db) {
     return rows.map((r) => ({ id: r.id, name: r.name, dosage: r.dosage, scheduledTime: r.hhmm }));
   });
 
-  /**
-   * "Tomei" (takeDose). O horário real é o do toque: até 15 min depois do
-   * previsto conta como "taken"; depois disso, "taken_late".
-   */
   router.post("/patient/doses/:id/take", { role: "patient" }, async (ctx) => {
     assertUuid(ctx.params.id, "Dose não encontrada.");
     return db.tx(async (q) => {
@@ -200,10 +162,6 @@ export function doseRoutes(router: Router, db: Db) {
     });
   });
 
-  /**
-   * "Não tomei" (skipDose), com o motivo. Todo "não tomei" avisa os cuidadores
-   * (notificação) e entra no alerta da home.
-   */
   router.post("/patient/doses/:id/skip", { role: "patient" }, async (ctx) => {
     assertUuid(ctx.params.id, "Dose não encontrada.");
     const { reason } = skipSchema.parse(ctx.body);

@@ -41,11 +41,6 @@ const DOSE_TITLE: Record<string, string> = {
 };
 
 export function historyRoutes(router: Router, db: Db) {
-  /**
-   * Eventos de um dia (getHistory): doses respondidas + relatos de sintoma,
-   * em ordem de horário. O filtro de medicamento esconde os relatos
-   * (sintoma não pertence a um medicamento). Dia calculado no fuso do app.
-   */
   router.get("/patients/:id/history", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     const date = dateParam.parse(ctx.query.get("date"));
@@ -55,7 +50,6 @@ export function historyRoutes(router: Router, db: Db) {
       throw new HttpError(422, "Data inválida.");
     }
 
-    // Garante que as doses vencidas de hoje já estejam como "missed".
     await refreshDoses(db, [ctx.params.id]);
 
     const tz = config.timezone;
@@ -85,7 +79,6 @@ export function historyRoutes(router: Router, db: Db) {
           [ctx.params.id, date, tz],
         );
 
-    // Alterações de cada dose ("Alterações" no detalhe do histórico).
     const doseIds = doses.rows.map((d) => d.id);
     const events = doseIds.length
       ? await db.query(
@@ -101,7 +94,6 @@ export function historyRoutes(router: Router, db: Db) {
     const items: { at: number; event: Record<string, unknown> }[] = [];
 
     for (const d of doses.rows) {
-      // A resposta normal do paciente (pendente → tomou/não tomou) não é "alteração".
       const changes = events.rows
         .filter((e) => e.dose_id === d.id && !(e.actor_type === "patient" && e.from_status === "pending"))
         .map((e) => ({
@@ -131,7 +123,6 @@ export function historyRoutes(router: Router, db: Db) {
           ...(changes.length
             ? { changes: changes.map(({ time, text }) => ({ time, text })) }
             : {}),
-          // O app mostra "Situação: Não tomou" + motivo quando esse campo existe.
           ...(isNotTaken
             ? {
                 skipReason:
@@ -161,10 +152,6 @@ export function historyRoutes(router: Router, db: Db) {
     return items.sort((a, b) => b.at - a.at).map((i) => i.event);
   });
 
-  /**
-   * Medicamentos que tiveram doses no mês (getHistoryMedications).
-   * `month` vai de 0 a 11, como no JavaScript.
-   */
   router.get("/patients/:id/history/medications", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     const { month, year } = z

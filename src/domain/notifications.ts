@@ -9,10 +9,6 @@ export type NewNotification = {
   symptomReportId?: string;
 };
 
-/**
- * Cria a notificação e entrega para todos os cuidadores do paciente
- * (cada um com o seu "lida"). Repetir a mesma dose/relato não duplica.
- */
 export async function notify(q: Queryable, n: NewNotification) {
   await q.query(
     `with n as (

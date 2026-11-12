@@ -1,12 +1,9 @@
-// Aplica database/schema.sql no banco de DATABASE_URL.
-// Uso: npm run db:migrate   (só para banco novo; o MVP ainda não tem migrações incrementais)
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 
 try {
   process.loadEnvFile();
 } catch {
-  // sem .env: usa as variáveis do ambiente
 }
 
 const sql = await readFile(new URL("../database/schema.sql", import.meta.url), "utf8");

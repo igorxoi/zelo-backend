@@ -4,7 +4,6 @@ import { ZodError } from "zod";
 import { config } from "./config.js";
 import { verifyToken, type TokenRole } from "./security.js";
 
-/** Erro com status HTTP. A mensagem vai para a tela do app, então é em português. */
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -14,14 +13,12 @@ export class HttpError extends Error {
   }
 }
 
-/** Resposta com status diferente de 200. */
 export class Reply {
   constructor(
     public status: number,
     public body?: unknown,
   ) {}
 }
-/** Resposta em HTML (usada só na página do link de convite). */
 export class HtmlReply {
   constructor(public html: string) {}
 }
@@ -34,7 +31,6 @@ export type Ctx = {
   params: Record<string, string>;
   query: URLSearchParams;
   body: unknown;
-  /** Preenchido nas rotas que exigem login. */
   auth: Auth;
   ip: string;
 };
@@ -49,7 +45,6 @@ type Route = {
   handler: Handler;
 };
 
-/** Roteador mínimo: "/patients/:id/medications" → params.id */
 export class Router {
   private routes: Route[] = [];
 
@@ -88,7 +83,6 @@ export class Router {
   }
 }
 
-/** Nomes dos campos para a mensagem de validação (a tela mostra o texto como veio). */
 const FIELD_LABELS: Record<string, string> = {
   name: "nome",
   fullName: "nome completo",
@@ -150,11 +144,6 @@ function send(res: ServerResponse, status: number, body?: unknown) {
   res.end(JSON.stringify(body));
 }
 
-/**
- * Cria o handler do servidor HTTP.
- * `authorize` confere se a pessoa do token ainda existe (ex.: paciente
- * excluído perde o acesso na hora).
- */
 export function createHandler(
   router: Router,
   authorize: (auth: Auth) => Promise<boolean>,
@@ -210,7 +199,6 @@ export function createHandler(
         const field = String(issue.path[issue.path.length - 1] ?? "");
         const label = FIELD_LABELS[field];
         return send(res, 422, {
-          // Aparece na tela do app, então o campo vai em português.
           message: label ? `Confira o campo ${label}: ${issue.message}.` : `Dado inválido: ${issue.message}.`,
           issues: error.issues.map((i) => ({ field: i.path.join("."), message: i.message })),
         });
@@ -221,11 +209,6 @@ export function createHandler(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Limite de tentativas (em memória, por IP). Protege o login e o código de
-// pareamento de 6 números contra tentativa e erro.
-// Se a API rodar em mais de uma instância, mover para Redis/banco.
-// ---------------------------------------------------------------------------
 const attempts = new Map<string, { count: number; resetAt: number }>();
 
 export function rateLimit(key: string, max: number, windowMs: number) {

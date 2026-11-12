@@ -7,13 +7,11 @@ import { created, HttpError, noContent, type Router } from "../http.js";
 const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 type Weekday = (typeof WEEKDAYS)[number];
 
-// Segunda = 1 ... domingo = 7 (ISO), como no banco.
 const weekdayToNumber = (day: Weekday) => WEEKDAYS.indexOf(day) + 1;
 const numberToWeekday = (n: number) => WEEKDAYS[n - 1];
 
 const time = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "use HH:mm");
 
-/** Mesmas quatro frequências do formulário do app (MedicationSchedule). */
 const scheduleSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("interval"),
@@ -42,7 +40,7 @@ const createSchema = z
     dosage: z.string().trim().min(1, "informe a dosagem").max(60),
     schedule: scheduleSchema,
     startDate: dateOnly,
-    endDate: dateOnly.nullable().default(null), // null = uso contínuo
+    endDate: dateOnly.nullable().default(null),
     notes: z.string().trim().max(500).default(""),
   })
   .refine((v) => v.endDate === null || v.endDate >= v.startDate, {
@@ -52,10 +50,6 @@ const createSchema = z
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-/**
- * Horários das doses de cada frequência (igual a getScheduleTimes do app).
- * Intervalo fixo: floor(24 / everyHours) doses por dia a partir do horário inicial.
- */
 export function getScheduleTimes(schedule: Schedule): string[] {
   switch (schedule.type) {
     case "interval": {
@@ -98,7 +92,6 @@ const SELECT = `
                where t.medication_id = m.id order by t.time_of_day) as times
   from medications m`;
 
-/** Monta o Medication do app a partir da linha do banco. */
 function toMedication(r: Row) {
   const times = r.times;
   let schedule: Schedule;
@@ -129,7 +122,6 @@ function toMedication(r: Row) {
 }
 
 export function medicationRoutes(router: Router, db: Db) {
-  /** Medicamentos ativos do paciente (getMedications). */
   router.get("/patients/:id/medications", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     const { rows } = await db.query<Row>(
@@ -139,10 +131,6 @@ export function medicationRoutes(router: Router, db: Db) {
     return rows.map(toMedication);
   });
 
-  /**
-   * Cadastra o medicamento (createMedication). Os horários são calculados aqui
-   * e as doses de cada dia nascem a partir deles (domain/doses.ts).
-   */
   router.post("/patients/:id/medications", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     const data = createSchema.parse(ctx.body);
@@ -183,10 +171,6 @@ export function medicationRoutes(router: Router, db: Db) {
     return created(toMedication(rows[0]));
   });
 
-  /**
-   * Encerra o medicamento (endMedication): sai da lista e para de gerar doses,
-   * mas o que já foi registrado continua no histórico.
-   */
   router.delete("/medications/:id", { role: "caregiver" }, async (ctx) => {
     assertUuid(ctx.params.id, "Medicamento não encontrado.");
     const found = await db.query<{ patient_id: string }>(
@@ -201,7 +185,6 @@ export function medicationRoutes(router: Router, db: Db) {
         ctx.params.id,
         ctx.auth.id,
       ]);
-      // Doses que ainda esperavam resposta somem; as já respondidas ficam.
       await q.query("delete from doses where medication_id = $1 and status = 'pending'", [ctx.params.id]);
     });
     return noContent();

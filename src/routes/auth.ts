@@ -11,7 +11,6 @@ import {
   verifyPassword,
 } from "../security.js";
 
-/** Formato que o app espera (AuthUser) + o token da sessão. */
 const session = (id: string, name: string, profile: "caregiver" | "patient") => ({
   token: signToken(id, profile),
   user: { id, name, profile },
@@ -37,12 +36,9 @@ const patientSignInSchema = z.object({
   code: z.string().transform(onlyDigits).refine((v) => v.length === 6, "o código tem 6 números"),
 });
 
-// Hash de uma senha qualquer, usado quando o e-mail não existe: assim o tempo
-// de resposta não revela se a conta existe.
 let dummyHash: Promise<string> | null = null;
 
 export function authRoutes(router: Router, db: Db) {
-  /** Login do cuidador (signInCaregiver). */
   router.post("/auth/caregiver/sign-in", {}, async (ctx) => {
     rateLimit(`sign-in:${ctx.ip}`, 10, 15 * 60 * 1000);
     const { email, password } = signInSchema.parse(ctx.body);
@@ -59,7 +55,6 @@ export function authRoutes(router: Router, db: Db) {
     return session(user.id, user.name, "caregiver");
   });
 
-  /** Cadastro do cuidador (registerCaregiver). Já devolve o usuário logado. */
   router.post("/auth/caregiver/register", {}, async (ctx) => {
     rateLimit(`register:${ctx.ip}`, 10, 60 * 60 * 1000);
     const data = registerSchema.parse(ctx.body);
@@ -83,16 +78,11 @@ export function authRoutes(router: Router, db: Db) {
     }
   });
 
-  /**
-   * Login do paciente (signInPatient): só o código de 6 números gerado pelo
-   * cuidador. O código vale 24 horas e só pode ser usado uma vez.
-   */
   router.post("/auth/patient/sign-in", {}, async (ctx) => {
     rateLimit(`patient-sign-in:${ctx.ip}`, 10, 15 * 60 * 1000);
     const { code } = patientSignInSchema.parse(ctx.body);
 
     const patient = await db.tx(async (q) => {
-      // O update já consome o código: duas pessoas não usam o mesmo.
       const used = await q.query<{ patient_id: string }>(
         `update patient_pairing_codes set used_at = now()
          where code_hash = $1 and used_at is null and revoked_at is null and expires_at > now()

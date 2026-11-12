@@ -1,9 +1,3 @@
-/**
- * Db de TESTE: fala com o PostgreSQL pelo `psql` (uma sessão persistente),
- * para rodar os testes onde o driver `pg` não está instalado. Em produção a
- * API usa createPgDb (src/db.ts). Os resultados voltam como JSON; por isso
- * os testes aqui NÃO substituem um teste com o driver `pg` de verdade.
- */
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { appendFileSync } from "node:fs";
 
@@ -35,7 +29,6 @@ function wrap(sql: string): { text: string; rows: boolean } {
   if (isDml && /\breturning\b/i.test(body)) {
     return { text: `with q as (${body}) select ${agg} from q`, rows: true };
   }
-  // WITH com DML (ex.: notify): o código não lê linhas desse tipo de comando.
   return { text: body, rows: false };
 }
 
@@ -47,7 +40,6 @@ export class PsqlDb implements Db {
   private lock: Promise<unknown> = Promise.resolve();
 
   constructor(database: string) {
-    // Conexão pelas variáveis padrão do PostgreSQL (PGHOST, PGUSER, PGPORT, PGPASSWORD).
     this.proc = spawn("psql", ["-d", database, "-X", "-A", "-t", "-q"]);
     this.proc.stdout.on("data", (chunk) => this.onData("out", chunk.toString()));
     this.proc.stderr.on("data", (chunk) => this.onData("err", chunk.toString()));
@@ -72,9 +64,7 @@ export class PsqlDb implements Db {
     });
   }
 
-  /** Executa direto na sessão (sem pegar o lock; quem chama já cuida disso). */
   private async raw<T>(sql: string, params: unknown[] = []): Promise<QueryResult<T>> {
-    // PGTEST_SQL_LOG: grava o SQL original (com $n) para conferir a inferência de tipos com PREPARE.
     if (process.env.PGTEST_SQL_LOG) appendFileSync(process.env.PGTEST_SQL_LOG, JSON.stringify(sql) + "\n");
     const filled = sql.replace(/\$(\d+)/g, (_, n) => literal(params[Number(n) - 1]));
     const { text, rows } = wrap(filled);

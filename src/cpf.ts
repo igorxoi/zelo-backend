@@ -1,7 +1,5 @@
-/** Deixa só os números do CPF. */
 export const onlyDigits = (value: string) => value.replace(/\D/g, "");
 
-/** Valida os 11 dígitos e os dois dígitos verificadores. */
 export function isValidCpf(value: string): boolean {
   const cpf = onlyDigits(value);
   if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;

@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Recria o banco de teste (zelo_test), aplica o schema e roda os testes.
-# Precisa do `psql` e de um PostgreSQL acessível pelas variáveis padrão
-# (PGHOST, PGUSER, PGPORT, PGPASSWORD). O banco "zelo_test" é APAGADO a cada execução.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 DB="${PGTEST_DB:-zelo_test}"

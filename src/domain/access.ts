@@ -3,16 +3,11 @@ import { HttpError } from "../http.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** IDs inválidos viram 404 (e não erro de SQL). */
 export function assertUuid(value: string, message = "Não encontrado."): string {
   if (!UUID.test(value)) throw new HttpError(404, message);
   return value;
 }
 
-/**
- * Confere se o cuidador acompanha o paciente. Quem não tem vínculo recebe 404
- * (e não 403), para não revelar que o paciente existe.
- */
 export async function requireLink(
   q: Queryable,
   userId: string,
@@ -27,7 +22,6 @@ export async function requireLink(
   return { isMaster: rows[0].is_master };
 }
 
-/** Ações só do cuidador master: convidar cuidadores, excluir o paciente. */
 export async function requireMaster(q: Queryable, userId: string, patientId: string) {
   const link = await requireLink(q, userId, patientId);
   if (!link.isMaster) {

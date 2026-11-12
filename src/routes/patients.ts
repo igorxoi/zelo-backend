@@ -13,15 +13,6 @@ import {
   hashPairingCode,
 } from "../security.js";
 
-/*
- * Regras de negócio (as mesmas de src/services/patients.ts no app):
- *   - Cuidador x paciente é N para N; quem cadastra o paciente é o master.
- *   - Só o master convida cuidadores, exclui o paciente e gera novo código.
- *   - O CPF evita cadastro duplicado e só é guardado como hash.
- *   - Código de pareamento: 6 números, 24 horas, uso único.
- *   - Convite: link válido por 7 dias.
- */
-
 const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}/, "use AAAA-MM-DD")
@@ -38,7 +29,6 @@ const createPatientSchema = z.object({
   nickname: z.string().trim().max(60).default(""),
   birthDate: isoDate,
   cpf: z.string().transform(onlyDigits).refine(isValidCpf, "CPF inválido"),
-  // O checkbox "tenho autorização" é obrigatório no app; aqui só barramos o false explícito.
   authorizationConfirmed: z.boolean().optional(),
 });
 
@@ -58,7 +48,6 @@ const daysLeft = (expiresAt: Date | string) =>
 
 const inviteLink = (token: string) => `${config.publicUrl}/convite/${token}`;
 
-/** Gera e grava um código de pareamento novo (revoga os anteriores). */
 async function issuePairingCode(q: Queryable, patientId: string, userId: string) {
   await q.query(
     `update patient_pairing_codes set revoked_at = now()
@@ -66,7 +55,6 @@ async function issuePairingCode(q: Queryable, patientId: string, userId: string)
     [patientId],
   );
 
-  // O índice único impede dois códigos ativos iguais: se colidir, sorteia outro.
   for (let attempt = 0; attempt < 10; attempt++) {
     const code = generatePairingCode();
     try {
@@ -87,7 +75,6 @@ async function issuePairingCode(q: Queryable, patientId: string, userId: string)
 }
 
 export function patientRoutes(router: Router, db: Db) {
-  /** Pacientes do cuidador logado (getPatients). */
   router.get("/patients", { role: "caregiver" }, async (ctx) => {
     const { rows } = await db.query(
       `select p.id, p.full_name, pc.relationship, pc.is_master
@@ -99,12 +86,10 @@ export function patientRoutes(router: Router, db: Db) {
       id: r.id,
       name: r.full_name,
       ...(r.relationship ? { relationship: r.relationship } : {}),
-      // Extra em relação ao app: indica em quais pacientes a pessoa é master.
       isMaster: r.is_master,
     }));
   });
 
-  /** Cadastro do paciente (createPatient): quem cadastra vira o master. */
   router.post("/patients", { role: "caregiver" }, async (ctx) => {
     const data = createPatientSchema.parse(ctx.body);
     if (data.authorizationConfirmed === false) {
@@ -140,13 +125,11 @@ export function patientRoutes(router: Router, db: Db) {
     }
   });
 
-  /** Dados do paciente com os cuidadores vinculados e os convites pendentes (getPatient). */
   router.get("/patients/:id", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     return getPatientDetails(db, ctx.params.id, ctx.auth.id);
   });
 
-  /** Atualiza os dados pessoais (updatePatient). Sem tela no MVP; só o master. */
   router.patch("/patients/:id", { role: "caregiver" }, async (ctx) => {
     await requireMaster(db, ctx.auth.id, ctx.params.id);
     const data = updatePatientSchema.parse(ctx.body);
@@ -157,28 +140,18 @@ export function patientRoutes(router: Router, db: Db) {
     return getPatientDetails(db, ctx.params.id, ctx.auth.id);
   });
 
-  /** Exclui o paciente e todos os dados dele, de forma permanente (deletePatient). */
   router.delete("/patients/:id", { role: "caregiver" }, async (ctx) => {
     await requireMaster(db, ctx.auth.id, ctx.params.id);
     await db.query("delete from patients where id = $1", [ctx.params.id]);
     return noContent();
   });
 
-  /**
-   * Novo código de pareamento (extra: o app ainda não tem tela para isso).
-   * Necessário quando o código venceu ou o paciente saiu do app.
-   */
   router.post("/patients/:id/pairing-codes", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     const pairing = await db.tx((q) => issuePairingCode(q, ctx.params.id, ctx.auth.id));
     return created({ pairingCode: pairing.code, pairingCodeExpiresAt: pairing.expiresAt });
   });
 
-  // -------------------------------------------------------------------------
-  // Convites de cuidador (só o master)
-  // -------------------------------------------------------------------------
-
-  /** Convida um cuidador (inviteCaregiver). Fica "pendente" até aceitar o link. */
   router.post("/patients/:id/invites", { role: "caregiver" }, async (ctx) => {
     await requireMaster(db, ctx.auth.id, ctx.params.id);
     const { name, email } = inviteSchema.parse(ctx.body);
@@ -217,7 +190,6 @@ export function patientRoutes(router: Router, db: Db) {
     }
   });
 
-  /** Novo link para um convite pendente; renova o prazo e invalida o link antigo (resendCaregiverInvite). */
   router.post("/patients/:id/invites/:inviteId/resend", { role: "caregiver" }, async (ctx) => {
     await requireMaster(db, ctx.auth.id, ctx.params.id);
     assertUuid(ctx.params.inviteId, "Convite não encontrado.");
@@ -244,7 +216,6 @@ export function patientRoutes(router: Router, db: Db) {
     };
   });
 
-  /** Cancela o convite pendente; o link deixa de funcionar (cancelCaregiverInvite). */
   router.delete("/patients/:id/invites/:inviteId", { role: "caregiver" }, async (ctx) => {
     await requireMaster(db, ctx.auth.id, ctx.params.id);
     assertUuid(ctx.params.inviteId, "Convite não encontrado.");
@@ -257,11 +228,6 @@ export function patientRoutes(router: Router, db: Db) {
     return noContent();
   });
 
-  // -------------------------------------------------------------------------
-  // Aceite do convite (extra: o app ainda não tem a tela do link)
-  // -------------------------------------------------------------------------
-
-  /** Mostra quem convidou, para a tela de aceite. Não exige login. */
   router.get("/invites/:token", {}, async (ctx) => {
     const { rows } = await db.query(
       `select i.name, i.email, i.expires_at, p.nickname, p.full_name, u.name as invited_by
@@ -279,15 +245,10 @@ export function patientRoutes(router: Router, db: Db) {
       caregiverName: invite.name,
       email: invite.email,
       invitedBy: invite.invited_by,
-      // Só o apelido: o nome completo do paciente não vai para quem ainda não tem vínculo.
       patientName: invite.nickname || invite.full_name.split(" ")[0],
     };
   });
 
-  /**
-   * Aceita o convite. A pessoa precisa estar logada com o mesmo e-mail do
-   * convite (o link sozinho não dá acesso a dados de saúde).
-   */
   router.post("/invites/:token/accept", { role: "caregiver" }, async (ctx) => {
     return db.tx(async (q) => {
       const { rows } = await q.query(
@@ -358,7 +319,6 @@ async function getPatientDetails(q: Queryable, patientId: string, userId: string
         status: "active" as const,
         isMaster: c.is_master,
       })),
-      // Convite vencido continua na lista com 0 dia, para o master reenviar.
       ...pending.rows.map((c) => ({
         id: c.id,
         name: c.name,

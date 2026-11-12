@@ -12,7 +12,6 @@ server.listen(config.port, () => {
   console.log(`Zelo API ouvindo na porta ${config.port}`);
 });
 
-// A cada minuto: cria as doses de hoje e marca as atrasadas (avisando os cuidadores).
 const timer = setInterval(() => {
   refreshDoses(db).catch((error) => console.error("Falha na rotina de doses:", error));
 }, 60_000);
