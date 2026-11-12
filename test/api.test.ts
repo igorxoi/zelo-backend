@@ -209,6 +209,17 @@ describe("convites e regra do master", () => {
     assert.ok(rows.every((r: any) => r.token_hash !== token));
   });
 
+  it("o link do convite abre uma página HTML com o código e o link do app", async () => {
+    const token = s.invite.link.split("/").pop();
+    const res = await fetch(base + `/convite/${token}`);
+    const html = await res.text();
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") ?? "", /text\/html/);
+    assert.ok(html.includes(`zelo://invite/${token}`));
+    const bad = await (await fetch(base + `/convite/<script>alert(1)</script>`)).text();
+    assert.ok(!bad.includes("<script>alert"));
+  });
+
   it("reenviar gera link novo e o antigo para de funcionar", async () => {
     const oldToken = s.invite.link.split("/").pop();
     const res = await api("POST", `/patients/${s.patientId}/invites/${s.invite.caregiver.id}/resend`, { token: s.A.token });
@@ -395,8 +406,11 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal(missed.body.length, 1);
     const doseId = missed.body[0].id;
 
-    const future = await api("POST", `/doses/${doseId}/confirm`, { token: s.A.token, body: { status: "late", time: localTime(180).text, notes: "" } });
-    assert.ok([422].includes(future.status) || localTime(180).minuteOfDay < minute);
+    // Horário no futuro só dá para testar se "daqui a 3h" ainda cai hoje (depois das 21h passa da meia-noite).
+    if (localTime(180).minuteOfDay > minute) {
+      const future = await api("POST", `/doses/${doseId}/confirm`, { token: s.A.token, body: { status: "late", time: localTime(180).text, notes: "" } });
+      assert.equal(future.status, 422);
+    }
 
     const ok = await api("POST", `/doses/${doseId}/confirm`, { token: s.B.token, body: { status: "late", time: localTime(-10).text, notes: "Administrado após o café" } });
     assert.equal(ok.status, 204);

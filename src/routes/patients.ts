@@ -56,7 +56,7 @@ const inviteSchema = z.object({
 const daysLeft = (expiresAt: Date | string) =>
   Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
 
-const inviteLink = (token: string) => `${config.inviteBaseUrl}/${token}`;
+const inviteLink = (token: string) => `${config.publicUrl}/convite/${token}`;
 
 /** Gera e grava um código de pareamento novo (revoga os anteriores). */
 async function issuePairingCode(q: Queryable, patientId: string, userId: string) {

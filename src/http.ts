@@ -21,6 +21,11 @@ export class Reply {
     public body?: unknown,
   ) {}
 }
+/** Resposta em HTML (usada só na página do link de convite). */
+export class HtmlReply {
+  constructor(public html: string) {}
+}
+
 export const created = (body: unknown) => new Reply(201, body);
 export const noContent = () => new Reply(204);
 
@@ -189,6 +194,14 @@ export function createHandler(
         ip: req.socket.remoteAddress ?? "unknown",
       });
 
+      if (result instanceof HtmlReply) {
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("X-Content-Type-Options", "nosniff");
+        res.setHeader("Referrer-Policy", "no-referrer");
+        return void res.end(result.html);
+      }
       if (result instanceof Reply) return send(res, result.status, result.body);
       return send(res, 200, result);
     } catch (error) {
