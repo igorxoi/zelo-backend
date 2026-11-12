@@ -341,7 +341,12 @@ describe("doses, alertas, notificações e histórico", () => {
     s.t = t;
 
     const missed = await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token });
-    assert.deepEqual(missed.body.map((d: any) => [d.name, d.scheduledTime]), [["Dose Teste 10mg", t.missed]]);
+    // Alerta do cuidador: a atrasada (missed) e as que já chegaram no horário e o paciente não confirmou (pending).
+    assert.deepEqual(
+      missed.body.map((d: any) => [d.scheduledTime, d.status]),
+      [[t.missed, "missed"], [t.skipped, "pending"], [t.taken, "pending"]],
+    );
+    assert.equal(missed.body[0].name, "Dose Teste 10mg");
     s.missedDoseId = missed.body[0].id;
 
     const notifs = await api("GET", "/notifications", { token: s.A.token });
@@ -376,8 +381,9 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal(byId[s.pending[2].id], "taken");
     assert.equal(byId[s.pending[0].id], "taken_late");
     assert.equal((await api("POST", `/patient/doses/${s.pending[2].id}/take`, { token: s.P.token })).status, 409);
-    // Dose já tomada some do alerta de dose não confirmada.
-    assert.equal((await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token })).body.length, 0);
+    // Dose já tomada some do alerta; sobra só a que ainda está sem resposta.
+    const left = await api("GET", `/patients/${s.patientId}/doses/missed`, { token: s.A.token });
+    assert.deepEqual(left.body.map((d: any) => d.scheduledTime), [s.t.skipped]);
   });
 
   it("'Não tomei' guarda o motivo; 'passando mal' avisa os cuidadores", { skip: !sameDay && "horário perto da meia-noite" }, async () => {

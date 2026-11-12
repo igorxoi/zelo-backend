@@ -61,24 +61,34 @@ export function doseRoutes(router: Router, db: Db) {
   // -------------------------------------------------------------------------
 
   /**
-   * Doses das últimas 24 horas que não foram tomadas (getMissedDoses): as que
-   * passaram do prazo sem resposta ("missed") e as que o paciente marcou como
-   * "não tomei" ("skipped"), até um cuidador confirmar ou dar como "não tomou". Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
+   * Doses que pedem atenção do cuidador (getMissedDoses), das últimas 24 horas:
+   *   - "pending": chegou o horário e o paciente ainda não confirmou;
+   *   - "missed": passou do prazo sem resposta;
+   *   - "skipped": o paciente marcou "não tomei".
+   * Cada uma sai da lista quando um cuidador confirma ou dá como "não tomou".
+   * Alimenta o DoseAlert da home. O `id` devolvido é o ID DA DOSE, e é ele
    * que o app deve mandar em confirmDose (campo `medicationId` do payload).
    */
   router.get("/patients/:id/doses/missed", { role: "caregiver" }, async (ctx) => {
     await requireLink(db, ctx.auth.id, ctx.params.id);
     await refreshDoses(db, [ctx.params.id]);
     const { rows } = await db.query(
-      `select d.id, m.name, m.dosage, to_char(d.scheduled_at at time zone $2, 'HH24:MI') as hhmm
+      `select d.id, d.status::text as status, m.name, m.dosage,
+              to_char(d.scheduled_at at time zone $2, 'HH24:MI') as hhmm
        from doses d join medications m on m.id = d.medication_id
-       where d.patient_id = $1 and d.status in ('missed', 'skipped')
+       where d.patient_id = $1 and d.status in ('pending', 'missed', 'skipped')
          and d.confirmed_by_type is distinct from 'caregiver'
+         and d.scheduled_at <= now()
          and d.scheduled_at > now() - interval '24 hours'
        order by d.scheduled_at`,
       [ctx.params.id, config.timezone],
     );
-    return rows.map((r) => ({ id: r.id, name: `${r.name} ${r.dosage}`, scheduledTime: r.hhmm }));
+    return rows.map((r) => ({
+      id: r.id,
+      name: `${r.name} ${r.dosage}`,
+      scheduledTime: r.hhmm,
+      status: r.status,
+    }));
   });
 
   /**
@@ -98,6 +108,8 @@ export function doseRoutes(router: Router, db: Db) {
       const next = data.status === "onTime" ? "taken" : data.status === "late" ? "taken_late" : "missed";
       if (next === "missed") {
         if (dose.status === "missed" || dose.status === "skipped") {
+          // Já está como "não tomada": o cuidador só está dando o alerta como visto.
+          // Fica registrado quem viu (confirmed_by_type) e o alerta da home some.
           await q.query(
             `update doses set note = coalesce(nullif($2, ''), note),
                     confirmed_by_type = 'caregiver', confirmed_by_user_id = $3 where id = $1`,
