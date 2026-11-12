@@ -325,7 +325,7 @@ describe("doses, alertas, notificações e histórico", () => {
   const sameDay = minute >= 90 && minute <= 23 * 60 + 20;
 
   it("gera as doses de hoje, marca as atrasadas e avisa o cuidador", { skip: !sameDay && "horário perto da meia-noite" }, async () => {
-    const t = { missed: localTime(-40).text, skipped: localTime(-20).text, taken: localTime(-5).text, soon: localTime(30).text };
+    const t = { missed: localTime(-40).text, skipped: localTime(-10).text, taken: localTime(-5).text, soon: localTime(30).text };
     const created = await api("POST", `/patients/${s.patientId}/medications`, {
       token: s.A.token,
       body: {
@@ -506,6 +506,8 @@ describe("doses, alertas, notificações e histórico", () => {
     // Continua como "não tomada" no histórico.
     const hist = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}&medicationId=${med.body.id}`, { token: s.A.token });
     assert.equal(hist.body[0].title, "Alerta 1mg não tomada");
+    assert.equal(hist.body[0].variant, "missed");
+    assert.equal(hist.body[0].tag, "Não tomada");
 
     await db.query("delete from notifications where dose_id = $1", [dose.id]);
     await db.query("delete from dose_events where dose_id = $1", [dose.id]);
@@ -520,7 +522,7 @@ describe("doses, alertas, notificações e histórico", () => {
 
     const filtered = await api("GET", `/patients/${s.patientId}/history?date=${todayLocal()}&medicationId=${s.doseMed.id}`, { token: s.A.token });
     assert.ok(filtered.body.length >= 3);
-    assert.ok(filtered.body.every((e: any) => e.variant === "medication" && e.title.startsWith("Dose Teste 10mg")));
+    assert.ok(filtered.body.every((e: any) => ["medication", "missed"].includes(e.variant) && e.title.startsWith("Dose Teste 10mg")));
     // A dose que o paciente marcou "não tomei" e o cuidador corrigiu mostra a alteração.
     const fixed = filtered.body.find((e: any) => e.title === "Dose Teste 10mg tomada com atraso" && e.changes);
     assert.ok(fixed, "dose corrigida pelo cuidador mostra a alteração");

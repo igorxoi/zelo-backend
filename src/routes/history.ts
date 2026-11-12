@@ -125,8 +125,8 @@ export function historyRoutes(router: Router, db: Db) {
           scheduledTime: d.scheduled_hhmm,
           title: `${d.name} ${d.dosage} ${DOSE_TITLE[d.status]}`,
           description: d.note ?? "",
-          tag: "Medicamento",
-          variant: "medication",
+          tag: d.status === "missed" || d.status === "skipped" ? "Não tomada" : "Medicamento",
+          variant: d.status === "missed" || d.status === "skipped" ? "missed" : "medication",
           ...(lastCaregiver ? { lastChangedBy: lastCaregiver.by } : {}),
           ...(changes.length
             ? { changes: changes.map(({ time, text }) => ({ time, text })) }
