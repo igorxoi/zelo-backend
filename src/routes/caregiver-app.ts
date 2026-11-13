@@ -35,6 +35,14 @@ export function caregiverAppRoutes(router: Router, db: Db) {
     }));
   });
 
+  router.get("/notifications/unread-count", { role: "caregiver" }, async (ctx) => {
+    const { rows } = await db.query<{ total: string }>(
+      "select count(*)::text as total from notification_recipients where user_id = $1 and read_at is null",
+      [ctx.auth.id],
+    );
+    return { count: Number(rows[0].total) };
+  });
+
   router.post("/notifications/:id/read", { role: "caregiver" }, async (ctx) => {
     assertUuid(ctx.params.id, "Notificação não encontrada.");
     const { rows } = await db.query(

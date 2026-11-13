@@ -567,8 +567,13 @@ describe("doses, alertas, notificações e histórico", () => {
     assert.equal((await api("POST", `/notifications/${first.id}/read`, { token: s.A.token })).status, 204);
     assert.equal((await api("GET", "/notifications", { token: s.A.token })).body.find((n: any) => n.id === first.id).read, true);
     assert.equal((await api("GET", "/notifications", { token: s.B.token })).body.find((n: any) => n.id === first.id).read, false);
+    const unread = (await api("GET", "/notifications", { token: s.B.token })).body.filter((n: any) => !n.read).length;
+    assert.equal((await api("GET", "/notifications/unread-count", { token: s.B.token })).body.count, unread);
+    assert.ok(unread > 0);
     await api("POST", "/notifications/read-all", { token: s.A.token });
     assert.ok((await api("GET", "/notifications", { token: s.A.token })).body.every((n: any) => n.read));
+    assert.equal((await api("GET", "/notifications/unread-count", { token: s.A.token })).body.count, 0);
+    assert.equal((await api("GET", "/notifications/unread-count", { token: s.B.token })).body.count, unread);
   });
 });
 
@@ -588,7 +593,8 @@ describe("perfis, encerrar medicamento e exclusão", () => {
     assert.equal(p.body.caregivers[0].phone, "11988887777");
   });
 
-  it("encerrar o medicamento tira da lista e mantém o histórico", async () => {
+  it("encerrar o medicamento tira da lista e mantém o histórico", async (t) => {
+    if (!s.doseMed) return t.skip("depende das doses do dia (horário perto da meia-noite)");
     const before = await api("GET", `/patients/${s.patientId}/medications`, { token: s.A.token });
     assert.equal((await api("DELETE", `/medications/${s.doseMed.id}`, { token: s.A.token })).status, 204);
     const after_ = await api("GET", `/patients/${s.patientId}/medications`, { token: s.A.token });
