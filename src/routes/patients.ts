@@ -4,13 +4,15 @@ import { config } from "../config.js";
 import { isValidCpf, onlyDigits } from "../cpf.js";
 import { isUniqueViolation, type Db, type Queryable } from "../db.js";
 import { assertUuid, requireLink, requireMaster } from "../domain/access.js";
-import { created, HttpError, noContent, type Router } from "../http.js";
+import { created, HttpError, noContent, rateLimit, type Router } from "../http.js";
 import {
-  generateInviteToken,
+  generateInviteCode,
   generatePairingCode,
   hashCpf,
-  hashInviteToken,
+  hashInviteCode,
   hashPairingCode,
+  isInviteCode,
+  normalizeInviteCode,
 } from "../security.js";
 
 const isoDate = z
@@ -46,7 +48,14 @@ const inviteSchema = z.object({
 const daysLeft = (expiresAt: Date | string) =>
   Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
 
-const inviteLink = (token: string) => `${config.publicUrl}/convite/${token}`;
+const INVALID_INVITE = "Código de convite inválido, vencido ou cancelado.";
+
+function parseInviteCode(raw: string, userId: string) {
+  rateLimit(`invite:${userId}`, 20, 15 * 60 * 1000);
+  const code = normalizeInviteCode(raw);
+  if (!isInviteCode(code)) throw new HttpError(410, INVALID_INVITE);
+  return code;
+}
 
 async function issuePairingCode(q: Queryable, patientId: string, userId: string) {
   await q.query(
@@ -165,12 +174,12 @@ export function patientRoutes(router: Router, db: Db) {
       throw new HttpError(409, "Esta pessoa já cuida deste paciente.");
     }
 
-    const token = generateInviteToken();
+    const code = generateInviteCode();
     try {
       const { rows } = await db.query<{ id: string }>(
         `insert into caregiver_invites (patient_id, invited_by, name, email, token_hash, expires_at)
          values ($1, $2, $3, $4, $5, now() + make_interval(days => $6::int)) returning id`,
-        [ctx.params.id, ctx.auth.id, name, email, hashInviteToken(token), config.inviteValidDays],
+        [ctx.params.id, ctx.auth.id, name, email, hashInviteCode(code), config.inviteValidDays],
       );
       return created({
         caregiver: {
@@ -180,7 +189,7 @@ export function patientRoutes(router: Router, db: Db) {
           status: "pending",
           inviteExpiresInDays: config.inviteValidDays,
         },
-        link: inviteLink(token),
+        code,
       });
     } catch (error) {
       if (isUniqueViolation(error, "one_pending_invite_per_email")) {
@@ -194,13 +203,13 @@ export function patientRoutes(router: Router, db: Db) {
     await requireMaster(db, ctx.auth.id, ctx.params.id);
     assertUuid(ctx.params.inviteId, "Convite não encontrado.");
 
-    const token = generateInviteToken();
+    const code = generateInviteCode();
     const { rows } = await db.query<{ id: string; name: string; email: string }>(
       `update caregiver_invites
        set token_hash = $3, expires_at = now() + make_interval(days => $4::int), last_sent_at = now()
        where id = $2 and patient_id = $1 and status = 'pending'
        returning id, name, email`,
-      [ctx.params.id, ctx.params.inviteId, hashInviteToken(token), config.inviteValidDays],
+      [ctx.params.id, ctx.params.inviteId, hashInviteCode(code), config.inviteValidDays],
     );
     if (rows.length === 0) throw new HttpError(404, "Convite não encontrado.");
 
@@ -212,7 +221,7 @@ export function patientRoutes(router: Router, db: Db) {
         status: "pending",
         inviteExpiresInDays: config.inviteValidDays,
       },
-      link: inviteLink(token),
+      code,
     };
   });
 
@@ -228,18 +237,19 @@ export function patientRoutes(router: Router, db: Db) {
     return noContent();
   });
 
-  router.get("/invites/:token", {}, async (ctx) => {
+  router.get("/invites/:code", { role: "caregiver" }, async (ctx) => {
+    const code = parseInviteCode(ctx.params.code, ctx.auth.id);
     const { rows } = await db.query(
       `select i.name, i.email, i.expires_at, p.nickname, p.full_name, u.name as invited_by
        from caregiver_invites i
        join patients p on p.id = i.patient_id
        join users u on u.id = i.invited_by
        where i.token_hash = $1 and i.status = 'pending'`,
-      [hashInviteToken(ctx.params.token)],
+      [hashInviteCode(code)],
     );
     const invite = rows[0];
     if (!invite || new Date(invite.expires_at) < new Date()) {
-      throw new HttpError(410, "Este convite expirou ou foi cancelado.");
+      throw new HttpError(410, INVALID_INVITE);
     }
     return {
       caregiverName: invite.name,
@@ -249,17 +259,18 @@ export function patientRoutes(router: Router, db: Db) {
     };
   });
 
-  router.post("/invites/:token/accept", { role: "caregiver" }, async (ctx) => {
+  router.post("/invites/:code/accept", { role: "caregiver" }, async (ctx) => {
+    const code = parseInviteCode(ctx.params.code, ctx.auth.id);
     return db.tx(async (q) => {
       const { rows } = await q.query(
         `select i.id, i.patient_id, i.email, i.expires_at, p.full_name
          from caregiver_invites i join patients p on p.id = i.patient_id
          where i.token_hash = $1 and i.status = 'pending' for update of i`,
-        [hashInviteToken(ctx.params.token)],
+        [hashInviteCode(code)],
       );
       const invite = rows[0];
       if (!invite || new Date(invite.expires_at) < new Date()) {
-        throw new HttpError(410, "Este convite expirou ou foi cancelado.");
+        throw new HttpError(410, INVALID_INVITE);
       }
 
       const me = await q.query<{ email: string }>("select email from users where id = $1", [ctx.auth.id]);

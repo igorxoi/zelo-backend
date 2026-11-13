@@ -1,7 +1,6 @@
 import { config } from "./config.js";
 import type { Db } from "./db.js";
-import { createHandler, HtmlReply, Router, type Auth } from "./http.js";
-import { invitePage } from "./invite-page.js";
+import { createHandler, Router, type Auth } from "./http.js";
 import { authRoutes } from "./routes/auth.js";
 import { caregiverAppRoutes } from "./routes/caregiver-app.js";
 import { doseRoutes } from "./routes/doses.js";
@@ -17,8 +16,6 @@ export function createApp(db: Db) {
     await db.query("select 1");
     return { status: "ok", missedAfterMinutes: config.doseMissedAfterMinutes };
   });
-
-  router.get("/convite/:token", {}, async ({ params }) => new HtmlReply(invitePage(params.token, config.webAppUrl)));
 
   authRoutes(router, db);
   patientRoutes(router, db);

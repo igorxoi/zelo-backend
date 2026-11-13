@@ -1,5 +1,4 @@
 import {
-  createHash,
   createHmac,
   randomBytes,
   randomInt,
@@ -38,8 +37,14 @@ export const hashPairingCode = (code: string) => hmac("pairing", code);
 
 export const generatePairingCode = () => String(randomInt(100000, 1000000));
 
-export const generateInviteToken = () => randomBytes(32).toString("base64url");
-export const hashInviteToken = (token: string) => createHash("sha256").update(token).digest("hex");
+const INVITE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const INVITE_CODE_LENGTH = 8;
+
+export const generateInviteCode = () =>
+  Array.from({ length: INVITE_CODE_LENGTH }, () => INVITE_ALPHABET[randomInt(INVITE_ALPHABET.length)]).join("");
+export const normalizeInviteCode = (input: string) => input.toUpperCase().replace(/[^A-Z0-9]/g, "");
+export const isInviteCode = (code: string) => /^[A-HJ-NP-Z2-9]{8}$/.test(code);
+export const hashInviteCode = (code: string) => hmac("invite", code);
 
 export type TokenRole = "caregiver" | "patient";
 export type TokenPayload = { sub: string; role: TokenRole; exp: number };

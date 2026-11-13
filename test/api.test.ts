@@ -185,7 +185,8 @@ describe("convites e regra do master", () => {
     assert.equal(res.status, 201);
     assert.equal(res.body.caregiver.status, "pending");
     assert.equal(res.body.caregiver.inviteExpiresInDays, 7);
-    assert.match(res.body.link, /^https:\/\/zelo\.test\/convite\/[\w-]{20,}$/);
+    assert.match(res.body.code, /^[A-HJ-NP-Z2-9]{8}$/);
+    assert.equal(res.body.link, undefined);
     s.invite = res.body;
 
     const dup = await api("POST", `/patients/${s.patientId}/invites`, {
@@ -200,51 +201,48 @@ describe("convites e regra do master", () => {
     assert.equal(pending.inviteExpiresInDays, 7);
   });
 
-  it("o token do convite não fica salvo no banco", async () => {
-    const token = s.invite.link.split("/").pop();
+  it("o código do convite não fica salvo no banco", async () => {
+    const code = s.invite.code;
     const { rows } = await db.query("select token_hash from caregiver_invites");
-    assert.ok(rows.every((r: any) => r.token_hash !== token));
+    assert.ok(rows.every((r: any) => r.token_hash !== code));
   });
 
-  it("o link do convite abre uma página HTML com o código e o link do app", async () => {
-    const token = s.invite.link.split("/").pop();
-    const res = await fetch(base + `/convite/${token}`);
-    const html = await res.text();
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type") ?? "", /text\/html/);
-    assert.ok(html.includes(`zelo://invite/${token}`));
-    assert.ok(html.includes(`https://zelo-web.test/invite/${token}`));
-    const bad = await (await fetch(base + `/convite/<script>alert(1)</script>`)).text();
-    assert.ok(!bad.includes("<script>alert"));
+  it("consultar o convite exige login; o código aceita minúsculas e hífen e códigos inválidos dão 410", async () => {
+    const code: string = s.invite.code;
+    assert.equal((await api("GET", `/invites/${code}`)).status, 401);
+    const spaced = `${code.slice(0, 4).toLowerCase()}-${code.slice(4).toLowerCase()}`;
+    assert.equal((await api("GET", `/invites/${spaced}`, { token: s.A.token })).status, 200);
+    assert.equal((await api("GET", `/invites/ABC`, { token: s.A.token })).status, 410);
+    assert.equal((await api("GET", `/invites/AAAAAAAA`, { token: s.A.token })).status, 410);
   });
 
-  it("reenviar gera link novo e o antigo para de funcionar", async () => {
-    const oldToken = s.invite.link.split("/").pop();
+  it("reenviar gera código novo e o antigo para de funcionar", async () => {
+    const oldCode = s.invite.code;
     const res = await api("POST", `/patients/${s.patientId}/invites/${s.invite.caregiver.id}/resend`, { token: s.A.token });
     assert.equal(res.status, 200);
-    assert.notEqual(res.body.link, s.invite.link);
-    assert.equal((await api("GET", `/invites/${oldToken}`)).status, 410);
-    s.invite.link = res.body.link;
-    const preview = await api("GET", `/invites/${res.body.link.split("/").pop()}`);
+    assert.notEqual(res.body.code, s.invite.code);
+    assert.equal((await api("GET", `/invites/${oldCode}`, { token: s.A.token })).status, 410);
+    s.invite.code = res.body.code;
+    const preview = await api("GET", `/invites/${res.body.code}`, { token: s.A.token });
     assert.equal(preview.body.patientName, "Dona Maria");
   });
 
   it("outra pessoa (e-mail diferente) não aceita; o convidado aceita e vira cuidador comum", async () => {
-    const token = s.invite.link.split("/").pop();
+    const code = s.invite.code;
     const other = await api("POST", "/auth/caregiver/register", {
       body: { name: "Intruso", email: "intruso@email.com", phone: "11977776666", cpf: cpf(678912345), password: "senha-forte-1" },
     });
-    assert.equal((await api("POST", `/invites/${token}/accept`, { token: other.body.token })).status, 403);
+    assert.equal((await api("POST", `/invites/${code}/accept`, { token: other.body.token })).status, 403);
 
     const pedro = await api("POST", "/auth/caregiver/register", {
       body: { name: "Pedro Silva", email: "pedro@email.com", phone: "11966665555", cpf: cpf(789123456), password: "senha-forte-1" },
     });
     s.B = pedro.body;
     assert.equal((await api("GET", `/patients/${s.patientId}`, { token: s.B.token })).status, 404);
-    const accepted = await api("POST", `/invites/${token}/accept`, { token: s.B.token });
+    const accepted = await api("POST", `/invites/${code}/accept`, { token: s.B.token });
     assert.equal(accepted.status, 200);
     assert.equal(accepted.body.isMaster, false);
-    assert.equal((await api("POST", `/invites/${token}/accept`, { token: s.B.token })).status, 410);
+    assert.equal((await api("POST", `/invites/${code}/accept`, { token: s.B.token })).status, 410);
 
     const detail = await api("GET", `/patients/${s.patientId}`, { token: s.B.token });
     assert.equal(detail.body.caregivers.length, 2);
@@ -261,18 +259,18 @@ describe("convites e regra do master", () => {
     assert.equal(list.body[0].isMaster, false);
   });
 
-  it("convite vencido não é aceito; cancelar invalida o link", async () => {
+  it("convite vencido não é aceito; cancelar invalida o código", async () => {
     const created = await api("POST", `/patients/${s.patientId}/invites`, { token: s.A.token, body: { name: "Ana", email: "ana@email.com" } });
-    const tokenA = created.body.link.split("/").pop();
+    const codeA = created.body.code;
     await db.query("update caregiver_invites set expires_at = now() - interval '1 day' where id = $1", [created.body.caregiver.id]);
-    assert.equal((await api("GET", `/invites/${tokenA}`)).status, 410);
+    assert.equal((await api("GET", `/invites/${codeA}`, { token: s.A.token })).status, 410);
     const detail = await api("GET", `/patients/${s.patientId}`, { token: s.A.token });
     assert.equal(detail.body.caregivers.find((c: any) => c.email === "ana@email.com").inviteExpiresInDays, 0);
 
     const resent = await api("POST", `/patients/${s.patientId}/invites/${created.body.caregiver.id}/resend`, { token: s.A.token });
     assert.equal(resent.status, 200);
     assert.equal((await api("DELETE", `/patients/${s.patientId}/invites/${created.body.caregiver.id}`, { token: s.A.token })).status, 204);
-    assert.equal((await api("GET", `/invites/${resent.body.link.split("/").pop()}`)).status, 410);
+    assert.equal((await api("GET", `/invites/${resent.body.code}`, { token: s.A.token })).status, 410);
     assert.equal((await api("DELETE", `/patients/${s.patientId}/invites/${created.body.caregiver.id}`, { token: s.A.token })).status, 404);
   });
 });
